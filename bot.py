@@ -101,4 +101,4 @@ async def activity(ctx):
         response += f"\n⚠️ Failed to DM: {', '.join(failed_dms)}"
     await ctx.send(response, ephemeral=True)
 
-bot.run(os.environ['TOKEN'])
+bot.run(os.getenv("TOKEN"))
