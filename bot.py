@@ -5,6 +5,8 @@ import json
 from datetime import datetime, timedelta
 import os
 import asyncio
+import dotenv
+dotenv.load_dotenv()
 
 with open("config.json", "r") as f:
     config = json.load(f)
