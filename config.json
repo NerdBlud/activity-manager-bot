@@ -1,0 +1,10 @@
+{
+  "server_id": 123456789012345678,
+  "server_name": "Your Server Name",
+  "activity_channel_id": 123456789012345678,
+  "allowed_roles": [
+    123456789012345678,
+    123456789012345679,
+    123456789012345680
+  ]
+}
