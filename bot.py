@@ -42,6 +42,12 @@ def increment_dead_chat_pings():
 
 config = load_config()
 
+# Convert string IDs to integers for Discord.py
+SERVER_ID = int(config["server_id"])
+ACTIVITY_CHANNEL_ID = int(config["activity_channel_id"])
+DEAD_CHAT_CHANNEL_ID = int(config["dead_chat_channel_id"])
+ALLOWED_ROLES = [int(role_id) for role_id in config["allowed_roles"]]
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -179,9 +185,13 @@ async def send_dead_chat_ping(author, guild, channel):
     return failed_dms
 
 def has_permission(interaction_or_context):
-    allowed_roles = config["allowed_roles"]
-    user_roles = [role.id for role in interaction_or_context.user.roles]
-    return any(role_id in allowed_roles for role_id in user_roles)
+    if isinstance(interaction_or_context, discord.Interaction):
+        user = interaction_or_context.user
+    else:
+        user = interaction_or_context.author
+    
+    user_roles = [role.id for role in user.roles]
+    return any(role_id in ALLOWED_ROLES for role_id in user_roles)
 
 @bot.tree.command(name="help", description="Displays all available commands.")
 async def slash_help(interaction: discord.Interaction):
@@ -215,18 +225,25 @@ async def slash_activity(interaction: discord.Interaction):
 
     await interaction.response.defer(ephemeral=True)
     
-    guild = bot.get_guild(config["server_id"])
-    channel = guild.get_channel(config["activity_channel_id"])
-    
-    if not channel:
-        await interaction.followup.send("❌ Activity channel not found!", ephemeral=True)
-        return
+    try:
+        guild = bot.get_guild(SERVER_ID)
+        if not guild:
+            await interaction.followup.send("❌ Server not found! Please check the server ID in config.", ephemeral=True)
+            return
 
-    failed_dms = await send_activity_check(interaction.user, guild, channel)
-    response = "✅ Activity check posted and DMs sent!"
-    if failed_dms:
-        response += f"\n⚠️ Failed to DM: {', '.join(failed_dms)}"
-    await interaction.followup.send(response, ephemeral=True)
+        channel = guild.get_channel(ACTIVITY_CHANNEL_ID)
+        if not channel:
+            await interaction.followup.send("❌ Activity channel not found! Please check the channel ID in config.", ephemeral=True)
+            return
+
+        failed_dms = await send_activity_check(interaction.user, guild, channel)
+        response = "✅ Activity check posted and DMs sent!"
+        if failed_dms:
+            response += f"\n⚠️ Failed to DM: {', '.join(failed_dms)}"
+        await interaction.followup.send(response, ephemeral=True)
+    except Exception as e:
+        print(f"Error in activity command: {e}")
+        await interaction.followup.send("❌ An error occurred while executing this command.", ephemeral=True)
 
 @bot.tree.command(name="deadchat", description="Pings the dead chat and DMs members to encourage activity.")
 async def slash_deadchat(interaction: discord.Interaction):
@@ -236,18 +253,25 @@ async def slash_deadchat(interaction: discord.Interaction):
 
     await interaction.response.defer(ephemeral=True)
     
-    guild = bot.get_guild(config["server_id"])
-    channel = guild.get_channel(config["dead_chat_channel_id"])
-    
-    if not channel:
-        await interaction.followup.send("❌ Dead chat channel not found!", ephemeral=True)
-        return
+    try:
+        guild = bot.get_guild(SERVER_ID)
+        if not guild:
+            await interaction.followup.send("❌ Server not found! Please check the server ID in config.", ephemeral=True)
+            return
 
-    failed_dms = await send_dead_chat_ping(interaction.user, guild, channel)
-    response = "📣 Dead chat ping sent and DMs delivered!"
-    if failed_dms:
-        response += f"\n⚠️ Failed to DM: {', '.join(failed_dms)}"
-    await interaction.followup.send(response, ephemeral=True)
+        channel = guild.get_channel(DEAD_CHAT_CHANNEL_ID)
+        if not channel:
+            await interaction.followup.send("❌ Dead chat channel not found! Please check the channel ID in config.", ephemeral=True)
+            return
+
+        failed_dms = await send_dead_chat_ping(interaction.user, guild, channel)
+        response = "📣 Dead chat ping sent and DMs delivered!"
+        if failed_dms:
+            response += f"\n⚠️ Failed to DM: {', '.join(failed_dms)}"
+        await interaction.followup.send(response, ephemeral=True)
+    except Exception as e:
+        print(f"Error in deadchat command: {e}")
+        await interaction.followup.send("❌ An error occurred while executing this command.", ephemeral=True)
 
 @bot.command(name="help")
 async def prefix_help(ctx):
@@ -279,18 +303,25 @@ async def prefix_activity(ctx):
         await ctx.send("🚫 You don't have permission to use this command!")
         return
 
-    guild = bot.get_guild(config["server_id"])
-    channel = guild.get_channel(config["activity_channel_id"])
-    
-    if not channel:
-        await ctx.send("❌ Activity channel not found!")
-        return
+    try:
+        guild = bot.get_guild(SERVER_ID)
+        if not guild:
+            await ctx.send("❌ Server not found! Please check the server ID in config.")
+            return
 
-    failed_dms = await send_activity_check(ctx.author, guild, channel)
-    response = "✅ Activity check posted and DMs sent!"
-    if failed_dms:
-        response += f"\n⚠️ Failed to DM: {', '.join(failed_dms)}"
-    await ctx.send(response)
+        channel = guild.get_channel(ACTIVITY_CHANNEL_ID)
+        if not channel:
+            await ctx.send("❌ Activity channel not found! Please check the channel ID in config.")
+            return
+
+        failed_dms = await send_activity_check(ctx.author, guild, channel)
+        response = "✅ Activity check posted and DMs sent!"
+        if failed_dms:
+            response += f"\n⚠️ Failed to DM: {', '.join(failed_dms)}"
+        await ctx.send(response)
+    except Exception as e:
+        print(f"Error in activity command: {e}")
+        await ctx.send("❌ An error occurred while executing this command.")
 
 @bot.command(name="deadchat")
 async def prefix_deadchat(ctx):
@@ -298,17 +329,24 @@ async def prefix_deadchat(ctx):
         await ctx.send("🚫 You don't have permission to use this command!")
         return
 
-    guild = bot.get_guild(config["server_id"])
-    channel = guild.get_channel(config["dead_chat_channel_id"])
-    
-    if not channel:
-        await ctx.send("❌ Dead chat channel not found!")
-        return
+    try:
+        guild = bot.get_guild(SERVER_ID)
+        if not guild:
+            await ctx.send("❌ Server not found! Please check the server ID in config.")
+            return
 
-    failed_dms = await send_dead_chat_ping(ctx.author, guild, channel)
-    response = "📣 Dead chat ping sent and DMs delivered!"
-    if failed_dms:
-        response += f"\n⚠️ Failed to DM: {', '.join(failed_dms)}"
-    await ctx.send(response)
+        channel = guild.get_channel(DEAD_CHAT_CHANNEL_ID)
+        if not channel:
+            await ctx.send("❌ Dead chat channel not found! Please check the channel ID in config.")
+            return
+
+        failed_dms = await send_dead_chat_ping(ctx.author, guild, channel)
+        response = "📣 Dead chat ping sent and DMs delivered!"
+        if failed_dms:
+            response += f"\n⚠️ Failed to DM: {', '.join(failed_dms)}"
+        await ctx.send(response)
+    except Exception as e:
+        print(f"Error in deadchat command: {e}")
+        await ctx.send("❌ An error occurred while executing this command.")
 
 bot.run(os.getenv("TOKEN"))
