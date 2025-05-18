@@ -6,19 +6,23 @@ from datetime import datetime, timedelta
 import os
 import asyncio
 import dotenv
+import random
 
 dotenv.load_dotenv()
 
 CONFIG_FILE = "config.json"
 ACTIVITY_DATA_FILE = "activity_data.json"
 
-with open(CONFIG_FILE, "r") as f:
-    config = json.load(f)
+def load_config():
+    if not os.path.exists(CONFIG_FILE):
+        raise FileNotFoundError(f"Config file {CONFIG_FILE} not found")
+    with open(CONFIG_FILE, "r") as f:
+        return json.load(f)
 
 def load_activity_data():
     if not os.path.exists(ACTIVITY_DATA_FILE):
         with open(ACTIVITY_DATA_FILE, "w") as f:
-            json.dump({"last_check": 0}, f)
+            json.dump({"last_check": 0, "dead_chat_pings": 0}, f)
     with open(ACTIVITY_DATA_FILE, "r") as f:
         return json.load(f)
 
@@ -29,6 +33,15 @@ def increment_activity_check():
         json.dump(data, f)
     return data["last_check"]
 
+def increment_dead_chat_pings():
+    data = load_activity_data()
+    data["dead_chat_pings"] += 1
+    with open(ACTIVITY_DATA_FILE, "w") as f:
+        json.dump(data, f)
+    return data["dead_chat_pings"]
+
+config = load_config()
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -36,32 +49,36 @@ bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}")
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} slash command(s)")
     except Exception as e:
-        print(e)
+        print(f"Error syncing commands: {e}")
 
 async def send_activity_check(author, guild, channel):
     check_number = increment_activity_check()
     now = datetime.utcnow()
     deadline = now + timedelta(days=2)
     timestamp = int(deadline.timestamp())
+
     embed = discord.Embed(
         title=f"<:reaper:1274745507389898773> Activity Check #{check_number}",
         description=(
             f"## 🕰️ Time Left: <t:{timestamp}:R>\n"
-            f"## 📈 Goal: 10+\n"
-            f"## ⁉️ Punishment:\n"
-            f"- **Not clicking to this activity check <t:{timestamp}:R> will result in you getting either warned, kicked, or even banned for inactivity reasons. Glory to {config['server_name']}.**"
+            f"## 📈 Goal: 10+ reactions\n"
+            f"## ⁉️ Consequences:\n"
+            f"- **Failure to react to this activity check <t:{timestamp}:R> may result in warnings, kicks, or bans for inactivity.**\n"
+            f"- **Glory to {config['server_name']}**"
         ),
         color=discord.Color.red()
     )
     avatar_url = author.avatar.url if author.avatar else author.default_avatar.url
     embed.set_footer(text=f"Posted by {author}", icon_url=avatar_url)
+
     message = await channel.send("||@everyone||", embed=embed)
-    await message.add_reaction("\u2705")
+    await message.add_reaction("✅")
+
     failed_dms = []
     async for member in guild.fetch_members(limit=None):
         if member.bot:
@@ -70,55 +87,103 @@ async def send_activity_check(author, guild, channel):
             await member.send(
                 f"📢 **Activity Check Alert #{check_number}!**\n"
                 f"Please check the activity announcement in {channel.mention} on **{config['server_name']}**!\n"
-                f"Deadline: <t:{timestamp}:R>"
+                f"Deadline: <t:{timestamp}:R>\n\n"
+                f"React with ✅ to confirm your activity!"
             )
             await asyncio.sleep(1)
         except discord.Forbidden:
             failed_dms.append(str(member))
         except Exception as e:
             print(f"Failed to DM {member.name}: {e}")
+
     return failed_dms
 
 async def send_dead_chat_ping(author, guild, channel):
+    ping_number = increment_dead_chat_pings()
     now = datetime.utcnow()
-    timestamp = int((now + timedelta(days=1)).timestamp())
+    review_time = now + timedelta(days=1)
+    timestamp = int(review_time.timestamp())
+    
+    last_message = None
+    async for msg in channel.history(limit=1):
+        last_message = msg
+    
+    last_active = "No recent messages"
+    if last_message:
+        last_active = f"<t:{int(last_message.created_at.timestamp())}:R> by {last_message.author.mention}"
+
     embed = discord.Embed(
-        title="☠️ Dead Chat Alert!",
+        title=f"☕️ Dead Chat Alert #{ping_number}!",
         description=(
-            f"## 🔔 <t:{timestamp}:R> until activity review\n"
-            f"### Hey everyone, let's bring this chat back to life!\n\n"
-            f"📣 **Why be active?**\n"
-            f"- Level up with roles\n"
-            f"- Special permissions & events\n"
-            f"- Recognition from staff\n\n"
-            f"📝 Stay active or risk being marked as inactive.\n"
-            f"Let’s revive the server — your next message could help spark it! 💬"
+            f"## 🔔 Activity review <t:{timestamp}:R>\n"
+            f"### Let's bring this chat back to life!\n\n"
+            f"📊 **Current Status**\n"
+            f"- Last message: {last_active}\n"
+            f"- Total members: {guild.member_count}\n\n"
+            f"🎯 **Why be active?**\n"
+            f"- Earn special roles and perks\n"
+            f"- Get priority for events\n"
+            f"- Build your reputation with staff\n\n"
+            f"💬 **How to participate?**\n"
+            f"- Start a conversation\n"
+            f"- Reply to others\n"
+            f"- Share your thoughts\n\n"
+            f"⚠️ **Inactive members may face consequences**"
         ),
         color=discord.Color.orange()
     )
+    
+    prompts = [
+        "What's your favorite movie/show right now?",
+        "Share something interesting that happened to you today!",
+        "What's your opinion on pineapple pizza?",
+        "If you could have any superpower, what would it be?",
+        "What's your go-to comfort food?"
+    ]
+    embed.add_field(name="💡 Conversation Starter", value=f"*{random.choice(prompts)}*", inline=False)
+    
     avatar_url = author.avatar.url if author.avatar else author.default_avatar.url
     embed.set_footer(text=f"Initiated by {author}", icon_url=avatar_url)
+    embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/892292745916481546.gif?size=96&quality=lossless")
+
     message = await channel.send("||@everyone||", embed=embed)
+    await message.add_reaction("💬")
+    await message.add_reaction("☕")
+
     failed_dms = []
     async for member in guild.fetch_members(limit=None):
         if member.bot:
             continue
         try:
-            await member.send(
-                f"👋 Hey there!\n\n"
-                f"Our chat in **{guild.name}** is feeling a bit quiet.\n"
-                f"Now’s your chance to shine: talk, hang out, and get perks for activity!\n"
-                f"You might unlock special roles, event access, or even mod favor.\n\n"
-                f"Join us in {channel.mention} and make some noise! 🗣️"
+            dm_embed = discord.Embed(
+                title=f"👋 {guild.name} needs you!",
+                description=(
+                    f"Our chat in **{channel.mention}** could use some activity!\n\n"
+                    f"**Why participate?**\n"
+                    f"- Earn special roles and perks\n"
+                    f"- Get noticed by staff\n"
+                    f"- Help build our community\n\n"
+                    f"Join the conversation now and help keep our server alive!\n"
+                    f"[Jump to channel]({message.jump_url})"
+                ),
+                color=discord.Color.orange()
             )
+            dm_embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
+            await member.send(embed=dm_embed)
             await asyncio.sleep(1)
         except discord.Forbidden:
             failed_dms.append(str(member))
         except Exception as e:
             print(f"Failed to DM {member.name}: {e}")
+
     return failed_dms
 
-@app_commands.command(name="help", description="Displays all available commands.")
+def has_permission(interaction_or_context):
+    allowed_roles = config["allowed_roles"]
+    user_roles = [role.id for role in interaction_or_context.user.roles]
+    return any(role_id in allowed_roles for role_id in user_roles)
+
+@bot.tree.command(name="help", description="Displays all available commands.")
 async def slash_help(interaction: discord.Interaction):
     embed = discord.Embed(
         title="📜 Activity Manager Bot Commands",
@@ -126,48 +191,65 @@ async def slash_help(interaction: discord.Interaction):
         color=discord.Color.blue()
     )
     embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else bot.user.default_avatar.url)
-    embed.set_image(url="https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmedia.tenor.com%2F-Rq8B_yGAmsAAAAC%2Fanime-girl-red-eyes.gif")
-    embed.add_field(name="📋 /help", value="Shows this help message (slash).", inline=False)
-    embed.add_field(name="📃 !help", value="Shows this help message (prefix).", inline=False)
-    embed.add_field(name="📢 /activity", value="Launch an activity check (slash).", inline=False)
-    embed.add_field(name="📣 !activity", value="Launch an activity check (prefix).", inline=False)
-    embed.add_field(name="☠️ /deadchat", value="Ping and DM for dead chat revival (slash).", inline=False)
-    embed.add_field(name="💀 !deadchat", value="Ping and DM for dead chat revival (prefix).", inline=False)
+    
+    commands_list = [
+        ("📋 /help", "Shows this help message"),
+        ("📢 /activity", "Launch an activity check (requires permission)"),
+        ("☕️ /deadchat", "Ping inactive members and encourage activity (requires permission)"),
+        ("📣 !activity", "Prefix version of /activity"),
+        ("☕️ !deadchat", "Prefix version of /deadchat")
+    ]
+    
+    for name, value in commands_list:
+        embed.add_field(name=name, value=value, inline=False)
+    
     avatar_url = interaction.user.avatar.url if interaction.user.avatar else interaction.user.default_avatar.url
     embed.set_footer(text=f"Requested by {interaction.user}", icon_url=avatar_url)
     await interaction.response.send_message(embed=embed)
 
-@app_commands.command(name="activity", description="Sends an activity check message and DMs members.")
+@bot.tree.command(name="activity", description="Sends an activity check message and DMs members.")
 async def slash_activity(interaction: discord.Interaction):
-    allowed_roles = config["allowed_roles"]
-    has_role = any(role.id in allowed_roles for role in interaction.user.roles)
-    if not has_role:
+    if not has_permission(interaction):
         await interaction.response.send_message("🚫 You don't have permission to use this command!", ephemeral=True)
         return
+
+    await interaction.response.defer(ephemeral=True)
+    
     guild = bot.get_guild(config["server_id"])
     channel = guild.get_channel(config["activity_channel_id"])
+    
+    if not channel:
+        await interaction.followup.send("❌ Activity channel not found!", ephemeral=True)
+        return
+
     failed_dms = await send_activity_check(interaction.user, guild, channel)
     response = "✅ Activity check posted and DMs sent!"
     if failed_dms:
         response += f"\n⚠️ Failed to DM: {', '.join(failed_dms)}"
-    await interaction.response.send_message(response, ephemeral=True)
+    await interaction.followup.send(response, ephemeral=True)
 
-@app_commands.command(name="deadchat", description="Pings the dead chat and DMs members to encourage activity.")
+@bot.tree.command(name="deadchat", description="Pings the dead chat and DMs members to encourage activity.")
 async def slash_deadchat(interaction: discord.Interaction):
-    allowed_roles = config["allowed_roles"]
-    has_role = any(role.id in allowed_roles for role in interaction.user.roles)
-    if not has_role:
+    if not has_permission(interaction):
         await interaction.response.send_message("🚫 You don't have permission to use this command!", ephemeral=True)
         return
+
+    await interaction.response.defer(ephemeral=True)
+    
     guild = bot.get_guild(config["server_id"])
     channel = guild.get_channel(config["dead_chat_channel_id"])
+    
+    if not channel:
+        await interaction.followup.send("❌ Dead chat channel not found!", ephemeral=True)
+        return
+
     failed_dms = await send_dead_chat_ping(interaction.user, guild, channel)
     response = "📣 Dead chat ping sent and DMs delivered!"
     if failed_dms:
         response += f"\n⚠️ Failed to DM: {', '.join(failed_dms)}"
-    await interaction.response.send_message(response, ephemeral=True)
+    await interaction.followup.send(response, ephemeral=True)
 
-@bot.command(name="help", description="Displays all available commands.")
+@bot.command(name="help")
 async def prefix_help(ctx):
     embed = discord.Embed(
         title="📜 Activity Manager Bot Commands",
@@ -175,48 +257,58 @@ async def prefix_help(ctx):
         color=discord.Color.blue()
     )
     embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else bot.user.default_avatar.url)
-    embed.set_image(url="https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fmedia.tenor.com%2F-Rq8B_yGAmsAAAAC%2Fanime-girl-red-eyes.gif")
-    embed.add_field(name="📃 /help", value="Shows this help message (slash).", inline=False)
-    embed.add_field(name="📃 !help", value="Shows this help message (prefix).", inline=False)
-    embed.add_field(name="📢 /activity", value="Launch an activity check (slash).", inline=False)
-    embed.add_field(name="📣 !activity", value="Launch an activity check (prefix).", inline=False)
-    embed.add_field(name="☠️ /deadchat", value="Ping and DM for dead chat revival (slash).", inline=False)
-    embed.add_field(name="💀 !deadchat", value="Ping and DM for dead chat revival (prefix).", inline=False)
+    
+    commands_list = [
+        ("📋 !help", "Shows this help message"),
+        ("📢 !activity", "Launch an activity check (requires permission)"),
+        ("☕️ !deadchat", "Ping inactive members and encourage activity (requires permission)"),
+        ("📣 /activity", "Slash command version of !activity"),
+        ("☕️ /deadchat", "Slash command version of !deadchat")
+    ]
+    
+    for name, value in commands_list:
+        embed.add_field(name=name, value=value, inline=False)
+    
     avatar_url = ctx.author.avatar.url if ctx.author.avatar else ctx.author.default_avatar.url
     embed.set_footer(text=f"Requested by {ctx.author}", icon_url=avatar_url)
     await ctx.send(embed=embed)
 
-@bot.command(name="activity", description="Sends an activity check message and DMs members.")
+@bot.command(name="activity")
 async def prefix_activity(ctx):
-    allowed_roles = config["allowed_roles"]
-    has_role = any(role.id in allowed_roles for role in ctx.author.roles)
-    if not has_role:
+    if not has_permission(ctx):
         await ctx.send("🚫 You don't have permission to use this command!")
         return
+
     guild = bot.get_guild(config["server_id"])
     channel = guild.get_channel(config["activity_channel_id"])
+    
+    if not channel:
+        await ctx.send("❌ Activity channel not found!")
+        return
+
     failed_dms = await send_activity_check(ctx.author, guild, channel)
     response = "✅ Activity check posted and DMs sent!"
     if failed_dms:
         response += f"\n⚠️ Failed to DM: {', '.join(failed_dms)}"
     await ctx.send(response)
 
-@bot.command(name="deadchat", description="Pings the dead chat and DMs members to encourage activity.")
+@bot.command(name="deadchat")
 async def prefix_deadchat(ctx):
-    allowed_roles = config["allowed_roles"]
-    has_role = any(role.id in allowed_roles for role in ctx.author.roles)
-    if not has_role:
+    if not has_permission(ctx):
         await ctx.send("🚫 You don't have permission to use this command!")
         return
+
     guild = bot.get_guild(config["server_id"])
     channel = guild.get_channel(config["dead_chat_channel_id"])
+    
+    if not channel:
+        await ctx.send("❌ Dead chat channel not found!")
+        return
+
     failed_dms = await send_dead_chat_ping(ctx.author, guild, channel)
     response = "📣 Dead chat ping sent and DMs delivered!"
     if failed_dms:
         response += f"\n⚠️ Failed to DM: {', '.join(failed_dms)}"
     await ctx.send(response)
 
-bot.tree.add_command(slash_help)
-bot.tree.add_command(slash_activity)
-bot.tree.add_command(slash_deadchat)
 bot.run(os.getenv("TOKEN"))
